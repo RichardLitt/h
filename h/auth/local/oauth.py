@@ -1,12 +1,88 @@
+from datetime import datetime
 import os
 
-from oauthlib.oauth2 import ClientCredentialsGrant, InvalidClientError
+import jwt
+from oauthlib.oauth2 import (
+    ClientCredentialsGrant,
+    InvalidClientError,
+    InvalidGrantError,
+    InvalidRequestError,
+)
 from pyramid.authentication import SessionAuthenticationPolicy
 from pyramid.exceptions import BadCSRFToken
 from pyramid.interfaces import ISessionFactory
 from pyramid.session import check_csrf_token, SignedCookieSessionFactory
 
 from h.api import get_consumer
+
+EPOCH = datetime(1970, 1, 1)
+JWT_BEARER = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+
+
+def posix_seconds(t):
+    return int((t - EPOCH).total_seconds())
+
+
+class JWTBearerGrant(ClientCredentialsGrant):
+    def validate_token_request(self, request):
+        params = request.params
+        for param in ('grant_type', 'assertion'):
+            if param not in params:
+                raise InvalidRequestError(
+                    'Request is missing {} parameter.'.format(param),
+                    request=request)
+
+        for param in ('grant_type', 'assertion', 'scope'):
+            if param in request.duplicate_params:
+                raise InvalidRequestError(
+                    'Duplicate {} parameter.'.format(param),
+                    request=request)
+
+        assertion = str(params['assertion'])
+
+        try:
+            appstruct = jwt.decode(assertion, verify=False)
+        except jwt.DecodeError:
+            raise InvalidGrantError('Invalid assertion format.',
+                                    request=request)
+
+        for claim in ('iss', 'sub', 'aud', 'exp'):
+            if claim not in appstruct:
+                raise InvalidGrantError(
+                    'Assertion is missing {} claim.'.format(claim),
+                    request=request)
+
+        if appstruct['aud'] != request.path_url:
+            raise InvalidGrantError(
+                'Assertion audience must be {}.'.format(request.path_url),
+                request=request)
+
+        if appstruct['exp'] <= posix_seconds(datetime.utcnow()):
+            raise InvalidGrantError('Assertion has expired.', request=request)
+
+        request.client_id = appstruct['iss']
+        request.client = get_consumer(request)
+
+        # XXX: Fix minor formatting errors -- remove after dropping UUID
+        request.client_id = request.client.client_id
+
+        if request.client is None:
+            raise InvalidClientError(
+                'Unrecognized issuer {}.'.format(request.client_id),
+                request=request)
+
+        try:
+            verified = jwt.decode(assertion, request.client.client_secret)
+        except jwt.DecodeError:
+            raise InvalidGrantError(
+                'Invalid assertion signature.', request=request)
+
+        userid = '{}@{}.accounts.{}'.format(
+            verified['sub'],
+            request.client_id,
+            request.domain
+        )
+        add_credentials(request, userId=userid)
 
 
 def add_credentials(request, **credentials):
@@ -51,6 +127,7 @@ def session_from_config(settings, prefix='session.'):
 
 def includeme(config):
     config.include('pyramid_oauthlib')
+    config.add_grant_type(JWTBearerGrant, JWT_BEARER)
     config.add_grant_type(SessionAuthenticationGrant)
 
     # Configure the authentication policy
