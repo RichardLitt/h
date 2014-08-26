@@ -267,8 +267,10 @@ class Hypothesis extends Annotator
         selected[a.id] = true
     if Object.keys(selected).length
       scope.selectedAnnotations = selected
+      scope.selectedAnnotationsCount = count
     else
       scope.selectedAnnotations = null
+      scope.selectedAnnotationsCount = 0
     this
 
   updateViewer: (annotations=[]) =>
@@ -281,6 +283,7 @@ class Hypothesis extends Annotator
     for a in annotations
       selected[a.id] = true
     scope.selectedAnnotations = selected
+    scope.selectedAnnotationsCount = Object.keys(selected).length
     this.show()
     this
 
