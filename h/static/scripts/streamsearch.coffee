@@ -48,7 +48,7 @@ class StreamSearch
     $scope.shouldShowAnnotation = (id) ->
       # TODO: Determine if the annotation id provided is part of the current
       # search results...
-      pass
+      true
 
 
 angular.module('h.streamsearch', imports, configure)
