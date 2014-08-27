@@ -311,6 +311,7 @@ class App
 
       update: (query) ->
         unless angular.equals $location.search()['q'], query
+          reset()
           if annotator.discardDrafts()
             $location.search('q', query or null)
 
